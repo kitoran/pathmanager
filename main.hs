@@ -20,15 +20,24 @@ data PathVar = Set FilePath
 
 escape = (Text.ShellEscape.bytes::Text.ShellEscape.Bash -> ByteString) . Text.ShellEscape.escape
 
-formLine :: ByteString -> FilePath -> BS.ByteString
-formLine v path = ("export "<>v<>"=$"<>v<>":" <> escape (fromString path) <> "  # line is managed by pathmanager")
+formLine :: ByteString -> FilePath -> Bool -> BS.ByteString
+formLine v path begin 
+  | begin = ("export "<>v<>"="<>escape (fromString path)<>":" <> "$" <> v<> "  # line is managed by pathmanager")
+  | not begin = ("export "<>v<>"=$"<>v<>":" <> escape (fromString path) <> "  # line is managed by pathmanager")
 
-addAction1 :: FilePath -> String -> FilePath -> Action IO
-addAction1 target v path = io $ 
+addAction1 :: FilePath -> String -> FilePath -> Bool -> Action IO
+addAction1 target v path begin = io $ 
     withFile (observe "bashrc"  target) AppendMode (\handle ->
-       hPutStrLn handle (traceId (toString a) `seq` a)) where a = "\n" <> formLine (fromString v) path <> "\n"
+       hPutStrLn handle (traceId (toString a) `seq` a)) where a = "\n" <> formLine (fromString v) path begin <> "\n"
 
-addAction homePath = withOption (option ['v'] 
+-- addAction :: FilePath -> Action IO
+addAction homePath = withOption (option ['b']
+                                        ["beginning"]
+                                        boolean
+                                        False
+                                        "Add value to the beginning of a variable, like VAR=value:$VAR")
+                                        (\begin -> 
+                     withOption (option ['v'] 
                                         ["variable"] 
                                         string 
                                         "PATH" 
@@ -40,24 +49,24 @@ addAction homePath = withOption (option ['v']
                                                                    (homePath++"/.bashrc")) 
                                                             "File to add command to, default is ~/.bashrc") 
                                                     (\target -> withNonOption directory
-                                                                              (\path -> addAction1 target var path)))
+                                                                              (\path -> addAction1 target var path begin))))
 
 addCommand homePath  = Command "add"
                                "\"add p\" adds line \"export PATH=$PATH:p\" to ~/.bashrc file (or other specified file)" 
-                               (addAction homePath )
+                               (addAction homePath) 
                                True
 
 removeAction1 :: FilePath -> FilePath -> Action IO
 removeAction1 target path = io $ do
     linesOfFile <- fmap (BS.lines::ByteString -> [ByteString]) $ BS.readFile target 
-    BS.writeFile target $ BS.intercalate "\n" ( filter (/= (formLine "PATH" path)) (linesOfFile::[BS.ByteString])) <> "\n"
+    BS.writeFile target $ BS.intercalate "\n" ( filter (\s -> (s /= formLine "PATH" path True) && (s /= formLine "PATH" path False)) (linesOfFile::[BS.ByteString])) <> "\n"
 
 removeAction homePath = withOption (option ['f'] ["file"] file (trace "default" (homePath++"/.bashrc")) "File to remove command from, default is ~/.bashrc") (\target -> withNonOption 
       directory
       (\path -> removeAction1 target path))
 
 removeCommand homePath  = Command "remove"
-                               "\"remove p\" removes line \"export PATH=$PATH:p\" from ~/.bashrc file (or other specified file)" 
+                               "\"remove p\" removes line \"export PATH=$PATH:p\" or \"export PATH=p:$PATH\" from ~/.bashrc file (or other specified file)" 
                                (removeAction homePath )
                                True
 
