@@ -25,10 +25,14 @@ formLine v path begin
   | begin = ("export "<>v<>"="<>escape (fromString path)<>":" <> "$" <> v<> "  # line is managed by pathmanager")
   | not begin = ("export "<>v<>"=$"<>v<>":" <> escape (fromString path) <> "  # line is managed by pathmanager")
 
-addAction1 :: FilePath -> String -> FilePath -> Bool -> Action IO
-addAction1 target v path begin = io $ 
+addAction1 :: FilePath -> String -> FilePath -> Bool -> Bool -> Action IO
+addAction1 target v path begin resolve = io $ do
+    resultPath <- if resolve then
+                    makeAbsolute path else
+                    return path  
+    let a = "\n" <> formLine (fromString v) resultPath begin <> "\n"
     withFile (observe "bashrc"  target) AppendMode (\handle ->
-       hPutStrLn handle (traceId (toString a) `seq` a)) where a = "\n" <> formLine (fromString v) path begin <> "\n"
+       hPutStrLn handle (traceId (toString a) `seq` a)) 
 
 -- addAction :: FilePath -> Action IO
 addAction homePath = withOption (option ['b']
@@ -42,19 +46,28 @@ addAction homePath = withOption (option ['b']
                                         string 
                                         "PATH" 
                                         "Variable to add string (path) to, default is PATH") 
-                                (\var -> withOption (option ['f']
-                                                            ["file"] 
-                                                            file 
-                                                            (trace "default" 
-                                                                   (homePath++"/.bashrc")) 
-                                                            "File to add command to, default is ~/.bashrc") 
-                                                    (\target -> withNonOption directory
-                                                                              (\path -> addAction1 target var path begin))))
+                                        (\var -> 
+                     withOption (option ['f']
+                                        ["file"] 
+                                        file 
+                                        (trace "default" 
+                                               (homePath++"/.bashrc")) 
+                                        "File to add command to, default is ~/.bashrc") 
+                                        (\target -> 
+                     withOption (option ['r']
+                                        ["resolve relative path"] 
+                                        boolean 
+                                        False
+                                        "resolve relative path, off by default") 
+                                        (\resolve -> 
+                     withNonOption directory
+                                  (\path -> 
+                     addAction1 target var path begin resolve )))))
 
-addCommand homePath  = Command "add"
-                               "\"add p\" adds line \"export PATH=$PATH:p\" to ~/.bashrc file (or other specified file)" 
-                               (addAction homePath) 
-                               True
+addCommand homePath = Command "add"
+                              "\"add p\" adds line \"export PATH=$PATH:p\" to ~/.bashrc file (or other specified file)" 
+                              (addAction homePath) 
+                              True
 
 removeAction1 :: FilePath -> FilePath -> Action IO
 removeAction1 target path = io $ do
